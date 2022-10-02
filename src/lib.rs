@@ -1,8 +1,14 @@
 #![warn(missing_docs)]
-//! This crate provides an async client to the Save Page Now 2 API
-//! The client can be used to issue capture request and inspect captures statuses
+//! This crate provides an async client to the Save Page Now 2 API.
 //!
-//! API reference: https://docs.google.com/document/d/1Nsv52MvSjbLb2PCpHlat0gkzw0EvtSgpKHu4mk0MnrA
+//! The client can be used to
+//! - request capture
+//! - get capture status
+//! - get user status
+//! - get system status
+//!
+//! API reference:
+//! <https://docs.google.com/document/d/1Nsv52MvSjbLb2PCpHlat0gkzw0EvtSgpKHu4mk0MnrA>
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -56,7 +62,7 @@ impl SPN2Client {
 pub struct SPN2CaptureResponse {
     /// The requested URL to capture
     pub url: String,
-    /// The ID of the capture request
+    /// The ID of the capture request  
     /// Use this to issue status requests
     pub job_id: String,
 }
@@ -65,15 +71,15 @@ pub struct SPN2CaptureResponse {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "status")]
 pub enum SPN2CaptureStatus {
-    /// Status: Pending
+    /// Status: Pending  
     /// Capture request has not been fully processed.
     #[serde(rename = "pending")]
     Pending {
         /// List of captured resources
         resources: Vec<String>,
     },
-    /// Status: Error
-    /// Capture request was not successful.
+    /// Status: Error  
+    /// Capture request was not successful, some error occured.
     #[serde(rename = "error")]
     Error {
         /// The type of exception
@@ -85,8 +91,8 @@ pub enum SPN2CaptureStatus {
         /// List of captured resources
         resources: Vec<String>,
     },
-    /// Status: Success
-    /// Capture request not successful.
+    /// Status: Success  
+    /// Capture request was successfully processed.
     #[serde(rename = "success")]
     Success {
         /// The requested URL after redirects
@@ -118,7 +124,7 @@ pub struct SPN2UserStatus {
 pub enum SPN2SystemStatus {
     /// Everything is fine
     Ok,
-    /// System is having issues, e.g being overloaded
+    /// System is having issues, e.g being overloaded  
     /// The system is still working, but delays are expected
     Issues {
         /// A description of the issues the system is having
