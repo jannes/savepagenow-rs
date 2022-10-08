@@ -1,6 +1,6 @@
 use std::{env, fs, time::Duration};
 
-use spn::{SPN2CaptureStatus, SPN2Client};
+use spn::{SPN2CaptureRequestOptParams, SPN2CaptureStatus, SPN2Client};
 use tokio::time;
 
 #[tokio::main(flavor = "current_thread")]
@@ -23,7 +23,7 @@ async fn main() {
     let user_status = client.get_user_status().await.unwrap();
     println!("user status: {user_status:?}");
     let capture_resp = client
-        .request_capture(url)
+        .request_capture(url, &SPN2CaptureRequestOptParams::default())
         .await
         .expect("failed to get capture response");
     println!("job_id: {}", capture_resp.job_id);

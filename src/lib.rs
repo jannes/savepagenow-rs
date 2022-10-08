@@ -16,7 +16,7 @@ use reqwest::{
     header::{HeaderMap, HeaderValue},
     Client, ClientBuilder, StatusCode,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 
 /// Errors that may occur when constructing the client and sending requests
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -25,6 +25,61 @@ const API_CAPTURE_URL: &str = "https://web.archive.org/save";
 const API_CAPTURE_STATUS_URL: &str = "https://web.archive.org/save/status";
 const API_USER_STATUS_URL: &str = "https://web.archive.org/save/status/user";
 const API_SYSTEM_STATUS_URL: &str = "https://web.archive.org/save/status/system";
+
+/// Parameters for a capture request
+///
+/// Refer to the
+/// [SNP2 docs](https://docs.google.com/document/d/1Nsv52MvSjbLb2PCpHlat0gkzw0EvtSgpKHu4mk0MnrA)
+/// for an explanation of the parameters.
+///
+/// # Examples
+///
+/// Don't use any parameters:
+/// ```
+/// let params = spn::SPN2CaptureRequestOptParams::default();
+/// ```
+///
+/// Use only some parameters
+/// ```
+/// let params = spn::SPN2CaptureRequestOptParams {
+///     capture_all: true,
+///     ..Default::default()
+/// };
+/// ```
+#[allow(missing_docs)]
+#[derive(Default, Serialize)]
+pub struct SPN2CaptureRequestOptParams {
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub capture_all: bool,
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub capture_outlinks: bool,
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub capture_screenshot: bool,
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub delay_wb_availability: bool,
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub force_get: bool,
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub skip_first_archive: bool,
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub outlinks_availability: bool,
+    #[serde(serialize_with = "serialize_bool_param")]
+    pub email_result: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "serialize_duration_param")]
+    pub if_not_archived_within: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "serialize_duration_param")]
+    pub js_behavior_timeout: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture_cookie: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_user_agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_password: Option<String>,
+}
 
 /// The client for the SPN2 API
 pub struct SPN2Client {
@@ -134,33 +189,21 @@ pub enum SPN2SystemStatus {
     Critical,
 }
 
-impl SPN2SystemStatus {
-    fn from_json(json: serde_json::Value) -> Result<Self, Error> {
-        let status = json
-            .as_object()
-            .and_then(|obj| obj.get("status"))
-            .and_then(|status| status.as_str())
-            .ok_or_else(|| format!("invalid response: {json}"))?;
-        match status {
-            "ok" => Ok(SPN2SystemStatus::Ok),
-            msg => Ok(SPN2SystemStatus::Issues {
-                description: msg.to_string(),
-            }),
-        }
-    }
-}
-
 impl SPN2Client {
     /// Issue a capture request for the given URL
-    pub async fn request_capture(&self, url: &str) -> Result<SPN2CaptureResponse, Error> {
-        let params = [("url", url)];
-        let resp = self
+    pub async fn request_capture(
+        &self,
+        url: &str,
+        opt_params: &SPN2CaptureRequestOptParams,
+    ) -> Result<SPN2CaptureResponse, Error> {
+        let params = SPN2CaptureRequestParams { url, opt_params };
+        let req = self
             .http_client
             .post(API_CAPTURE_URL)
             .timeout(self.timeout)
-            .form(&params)
-            .send()
-            .await?;
+            .form(&params);
+        eprintln!("{req:?}");
+        let resp = req.send().await?;
         match resp.status() {
             StatusCode::OK => Ok(resp.json::<SPN2CaptureResponse>().await?),
             s => Err(format!("unexpected response status: {s}").into()),
@@ -212,6 +255,48 @@ impl SPN2Client {
             s => Err(format!("unexpected response status: {s}").into()),
         }
     }
+}
+
+impl SPN2SystemStatus {
+    fn from_json(json: serde_json::Value) -> Result<Self, Error> {
+        let status = json
+            .as_object()
+            .and_then(|obj| obj.get("status"))
+            .and_then(|status| status.as_str())
+            .ok_or_else(|| format!("invalid response: {json}"))?;
+        match status {
+            "ok" => Ok(SPN2SystemStatus::Ok),
+            msg => Ok(SPN2SystemStatus::Issues {
+                description: msg.to_string(),
+            }),
+        }
+    }
+}
+
+fn serialize_bool_param<S>(b: &bool, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let b = if *b { 1 } else { 0 };
+    s.serialize_u8(b)
+}
+
+fn serialize_duration_param<S>(d: &Option<Duration>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if let Some(d) = d {
+        s.serialize_u64(d.as_secs())
+    } else {
+        s.serialize_none()
+    }
+}
+
+#[derive(Serialize)]
+struct SPN2CaptureRequestParams<'a> {
+    url: &'a str,
+    #[serde(flatten)]
+    opt_params: &'a SPN2CaptureRequestOptParams,
 }
 
 #[cfg(test)]
@@ -282,5 +367,36 @@ mod tests {
         });
         let s = SPN2SystemStatus::from_json(status);
         assert!(matches!(s, Ok(SPN2SystemStatus::Issues { .. })));
+    }
+
+    #[test]
+    fn serialize_request_params() {
+        let opt_params = SPN2CaptureRequestOptParams {
+            capture_all: true,
+            capture_outlinks: true,
+            capture_screenshot: true,
+            delay_wb_availability: true,
+            force_get: true,
+            skip_first_archive: true,
+            outlinks_availability: true,
+            email_result: false,
+            if_not_archived_within: Some(Duration::from_secs(1)),
+            js_behavior_timeout: None,
+            capture_cookie: None,
+            use_user_agent: Some("Dummy".to_string()),
+            target_username: None,
+            target_password: None,
+        };
+        let params = SPN2CaptureRequestParams {
+            url: "example.com",
+            opt_params: &opt_params,
+        };
+        let params_encoded =
+            serde_urlencoded::to_string(params).expect("failed to serialize params");
+        let expected = "url=example.com&capture_all=1&capture_outlinks=1&\
+                        capture_screenshot=1&delay_wb_availability=1&force_get=1&\
+                        skip_first_archive=1&outlinks_availability=1&email_result=0&\
+                        if_not_archived_within=1&use_user_agent=Dummy";
+        assert_eq!(expected, params_encoded);
     }
 }
